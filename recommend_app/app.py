@@ -1,7 +1,10 @@
 from flask import Flask, request, jsonify, render_template, session
+from flask_session import Session
 import warnings
 import os
 import pickle
+import json
+
 
 ## 分析系
 import numpy as np
@@ -16,6 +19,15 @@ import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 
 app = Flask(__name__)
+
+## サーバーサイドセッションの設定を追加
+app.config['SESSION_TYPE'] = 'filesystem'  # ファイルシステムにセッションを保存
+app.config['SESSION_FILE_DIR'] = os.path.join(os.getcwd(), 'flask_session')  # セッションファイルの保存先ディレクトリ
+app.config['SESSION_PERMANENT'] = False  # セッションを永続化するかどうか
+app.config['SESSION_USE_SIGNER'] = True  # セッションIDを署名して保護する
+
+## Flask-Sessionの初期化
+Session(app)
 
 ## APIキーの取得
 load_dotenv()
@@ -60,16 +72,6 @@ columns_trackInfos = ['track_' + useTrackInfo for useTrackInfo in trackInfos]
 columns_artistInfos = ['artist_' + useArtistInfo for useArtistInfo in artistInfos]
 
 columns = columns_trackInfos + columns_artistInfos + trackImages + useParams
-
-## プレイリストID
-playlist_ids = []
-
-## 初期定義
-df_transformed = []
-df_id = pd.DataFrame(columns = columns)
-mean = []
-std = []
-pca = PCA(n_components = 2)
 
 """
 'spotify:playlist:37i9dQZF1DXdurasRmJgpJ', ## 令和ポップス
@@ -136,15 +138,6 @@ def saveAudioFeatures(all_tracks, datas):
 
                     data.append(_list)
 
-            """
-            filename = 'data' + str(index) + '.pkl'
-
-            with open(filename, 'wb') as f:
-                pickle.dump(data, f)
-
-            print("APIから", filename, "を取得しました。", flush=True)
-            """
-
 ## 標準化する関数
 def StandardScaler(_df, _mean, _std):
     _df = _df.to_numpy()
@@ -156,14 +149,14 @@ def StandardScaler(_df, _mean, _std):
     return _df_scaled
 
 ## 関連曲を取得する関数
-def getRecommendations(_df, i):
-    global df_id, columns, useParams
+def getRecommendations(_df_id, _df_transformed, i):
+    global columns, useParams
 
     ## シード曲の情報
-    seed_track_id = [df_id['track_id'].iloc[i]]
-    seed_track_name = [df_id['track_name'].iloc[i]]
-    seed_artist_id = [df_id['artist_id'].iloc[i]]
-    seed_params = [df_id[param].iloc[i] for param in useParams]
+    seed_track_id = [_df_id['track_id'].iloc[i]]
+    seed_track_name = [_df_id['track_name'].iloc[i]]
+    seed_artist_id = [_df_id['artist_id'].iloc[i]]
+    seed_params = [_df_id[param].iloc[i] for param in useParams]
 
     ## 閾値
     thresold = 0.1
@@ -205,7 +198,7 @@ def getRecommendations(_df, i):
     ## 関連曲がシード曲と一致していた場合は削除
     _recommendations_tracks = [
         track for track in _recommendations['tracks']
-        if track['name'] not in df_id.track_name and track['name'] not in seed_track_name
+        if track['name'] not in _df_id.track_name and track['name'] not in seed_track_name
     ]
 
     track_ids = [track['id'] for track in _recommendations_tracks]
@@ -232,62 +225,20 @@ def getRecommendations(_df, i):
 
         return _addData
 
-## クリックイベント
-def onClick(i):
-    global df_transformed, df_id, mean, std, pca
-
-    print("クリックされました。", flush=True)
-
-    ## レコメンドデータを取得
-    _addData = getRecommendations(df_transformed, i)
-
-    if _addData != []:
-        ## データフレームに変換
-        df_add_id = pd.DataFrame(data = _addData, index = None, columns = columns)
-        df_add_id['UserId'] = 0
-        df_add_id['recommendId'] = i
-
-        ## レコメンドデータを追加
-        df_id = pd.concat([df_id, df_add_id])
-        df_id = df_id.reset_index()
-        df_id = df_id.drop('index', axis = 1)
-
-        ## 数値以外を削除
-        df_add = df_add_id.iloc[:, len(trackInfos)+len(artistInfos)+len(trackImages):len(columns)-1]
-
-        ## 標準化
-        df_add_scaled = StandardScaler(df_add, mean, std)
-        df_add_scaled = pd.DataFrame(
-            data = df_add_scaled,
-            index = None,
-            columns = columns[len(trackInfos)+len(artistInfos)+len(trackImages):len(columns)-1]
-        )
-
-        ## 主成分分析
-        df_add_transformed = pca.transform(df_add_scaled)
-
-        ## レコメンドデータを追加
-        df_transformed = np.vstack((df_transformed, df_add_transformed))
-
-        df_id = df_id.reset_index()
-        df_id = df_id.drop('index', axis = 1)
-
-    return {
-        'result': 'success'
-    }
-
 ## プレイリストIDの取得
 @app.route('/playlist_id', methods=['POST'])
 def getPlaylistId():
-    global playlist_ids, df_id, df_transformed, mean, std, pca
+    global columns
 
-    df_transformed = []
-    df_id = pd.DataFrame(columns = columns)
-    mean = []
-    std = []
+    playlist_ids = request.json
+    session['playlist_ids'] = playlist_ids
 
-    _getData = request.json
-    playlist_ids = _getData
+    # 各ユーザーごとのデータフレームと分析データをセッションに保存
+    session['df_id'] = pd.DataFrame(columns=columns).to_dict()
+    session['df_scaled'] = []
+    session['df_transformed'] = []
+    session['mean'] = []
+    session['std'] = []
 
     ## 各プレイリスト内のトラックを取得
     all_tracks = getPlaylistsTracks(playlist_ids)
@@ -310,11 +261,12 @@ def getPlaylistId():
         dfList[i]['recommendId'] = -1
 
     ## データフレームを連結
-    for _df in dfList:
-        df_id = pd.concat([df_id, _df])
+    df_id = pd.DataFrame(columns = columns)
+    for _df_transformed in dfList:
+        df_id = pd.concat([df_id, _df_transformed])
 
-    df_id = df_id.reset_index()
-    df_id = df_id.drop('index', axis = 1)
+    df_id = df_id.reset_index(drop = True)
+    session['df_id'] = df_id.to_dict()
 
     ## 数値以外を削除
     df = df_id.iloc[:, len(trackInfos)+len(artistInfos)+len(trackImages):len(columns)-1]
@@ -329,11 +281,16 @@ def getPlaylistId():
         index = None,
         columns = columns[len(trackInfos)+len(artistInfos)+len(trackImages):len(columns)-1]
     )
+    session['df_scaled'] = df_scaled.values.tolist()
 
     ## 主成分分析
     pca = PCA(n_components = 2)
     pca.fit(df_scaled)
     df_transformed = pca.transform(df_scaled)
+
+    session['df_transformed'] = df_transformed.tolist()
+    session['mean'] = mean.tolist()
+    session['std'] = std.tolist()
 
     return {
         'result': 'success'
@@ -343,7 +300,65 @@ def getPlaylistId():
 @app.route('/run_function', methods=['POST'])
 def run_function():
     i = request.json
-    result = onClick(i)
+
+    df_id = pd.DataFrame(session['df_id'])
+    df_scaled = np.array(session['df_scaled'])
+    df_transformed = np.array(session['df_transformed'])
+    mean = np.array(session['mean'])
+    std = np.array(session['std'])
+
+    # PCAモデルの再構築
+    pca = PCA(n_components = 2)
+    pca.fit(df_scaled)
+
+    ## クリックイベント
+    def onClick(i, df_transformed, df_id, mean, std, pca):
+        print("クリックされました。", flush=True)
+
+        ## レコメンドデータを取得
+        _addData = getRecommendations(df_id, df_transformed, i)
+
+        if _addData != []:
+            ## データフレームに変換
+            df_add_id = pd.DataFrame(data = _addData, index = None, columns = columns)
+            df_add_id['UserId'] = 0
+            df_add_id['recommendId'] = i
+
+            ## レコメンドデータを追加
+            df_id = pd.concat([df_id, df_add_id])
+            df_id = df_id.reset_index()
+            df_id = df_id.drop('index', axis = 1)
+
+            ## 数値以外を削除
+            df_add = df_add_id.iloc[:, len(trackInfos)+len(artistInfos)+len(trackImages):len(columns)-1]
+
+            ## 標準化
+            df_add_scaled = StandardScaler(df_add, mean, std)
+            df_add_scaled = pd.DataFrame(
+                data = df_add_scaled,
+                index = None,
+                columns = columns[len(trackInfos)+len(artistInfos)+len(trackImages):len(columns)-1]
+            )
+
+            ## 主成分分析
+            df_add_transformed = pca.transform(df_add_scaled)
+
+            ## レコメンドデータを追加
+            df_transformed = np.vstack((df_transformed, df_add_transformed))
+
+            df_id = df_id.reset_index()
+            df_id = df_id.drop('index', axis = 1)
+
+            # 更新されたデータをセッションに保存
+            session['df_id'] = df_id.to_dict()
+            session['df_transformed'] = df_transformed.tolist()
+            print("df_transformed saved in session:", session.get('df_transformed'), flush=True)
+
+        return {
+            'result': 'success'
+        }
+
+    result = onClick(i, df_transformed, df_id, mean, std, pca)
 
     # 結果をクライアントに返す
     return jsonify(result)
@@ -351,15 +366,12 @@ def run_function():
 # 情報をJSON形式でJavascriptに送る
 @app.route('/data')
 def get_data():
-    global df_transformed, df_id
-
-    _df_transformed = pd.DataFrame(data = df_transformed, columns = ['x', 'y'])
-    _df_transformed = _df_transformed.to_dict(orient='records')
-    _df_id = df_id.to_dict(orient='records')
+    df_transformed = pd.DataFrame(session['df_transformed'], columns=['x', 'y'])
+    df_id = pd.DataFrame(session['df_id'])
 
     response = {
-        'transformed': _df_transformed,
-        'id': _df_id
+        'transformed': df_transformed.to_dict(orient='records'),
+        'id': df_id.to_dict(orient='records')
     }
 
     return jsonify(response)
