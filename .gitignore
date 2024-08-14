@@ -1,2 +1,5 @@
 .DS_Store
 .cache
+path/
+recommend_app/__pycache__/
+recommend_app/.env
