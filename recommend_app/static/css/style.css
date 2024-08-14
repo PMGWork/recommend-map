@@ -1,0 +1,114 @@
+body {
+    background-color: #202020;
+}
+
+#canvas_wrapper {
+    display: none;
+}
+
+canvas {
+    position: absolute;
+}
+
+#form_wrapper {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 100vw;
+    height: 100vh;
+}
+
+#form_area {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    margin: 20px 0;
+}
+
+#form_area input {
+    width: 320px;
+    margin: 5px 0;
+    padding: 10px;
+    border-radius: 8px;
+    border: none;
+    background: #303030;
+    color: #f0f0f0;
+}
+
+#form_button {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    margin: 20px 0;
+}
+
+#form_button input {
+    width: 160px;
+    margin: 5px 5px;
+    padding: 10px;
+    border-radius: 8px;
+    border: none;
+    background: #303030;
+    color: #f0f0f0;
+    font-weight: bold;
+}
+
+#popup {
+    display: none;
+    background: #303030;
+    color: #f0f0f0;
+    position: absolute;
+    left: 10px;
+    top: 10px;
+    border-radius: 8px;
+    padding: 15px;
+}
+
+.track_wrapper {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+.track_info {
+    display: inline-block;
+    margin: 0 20px;
+}
+
+#jacket {
+    width: 96px;
+    height: 96px;
+    border-radius: 8px;
+}
+
+#track_name {
+    margin: 0;
+    font-size: 20px;
+    white-space: nowrap
+}
+
+#artist_name {
+    margin: 5px 0;
+    font-size: 14px;
+    white-space: nowrap
+}
+
+.button_wrapper {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+#search_track {
+    margin: 15px 0 0 0;
+    font-size: 14px;
+    white-space: nowrap;
+    color: #b0b0b0;
+}
+
+#search_track:hover {
+    color: #f0f0f0;
+}
