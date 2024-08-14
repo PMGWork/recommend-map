@@ -1,5 +1,5 @@
 .DS_Store
 .cache
-path/
+path/to/venv/
 recommend_app/__pycache__/
 recommend_app/.env
